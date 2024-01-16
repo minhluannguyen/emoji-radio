@@ -12,6 +12,7 @@
 #define BLINK_TIME 400
 
 #ifdef UBIT_V2
+
 void clock_init(void)
 {
     /* Enable the cycle counter, part of the data watchpoint and trace module */
@@ -27,19 +28,13 @@ void clock_init(void)
 #define FREQ 64
 #endif
 
-image receive_draw =
+// Initialisation of the drawing variables
+image receive_drawing =
     IMAGE(0,0,0,0,0,
           0,0,0,0,0,
           1,1,1,0,0,
           0,0,0,0,0,
           0,0,0,0,0);
-
-image receive_draw2 =
-    IMAGE(0,0,1,0,0,
-          0,0,1,0,0,
-          1,1,1,1,1,
-          0,0,1,0,0,
-          0,0,1,0,0);
 
 image current_drawing =
     IMAGE(0,0,0,0,0,
@@ -55,17 +50,19 @@ image saved_drawing =
           0,0,0,0,0,
           0,0,0,0,0);
 
+// Initialisation of the cursor position
 int posX = INIT_POS_X;
 int posY = INIT_POS_Y;
 
 int display_mode_on = 0;
 int play_sound = 0;
 
+/* Update the cursor position*/
 void update_board_pos(int i, int j) {
-
     // Copy the saved state to the current drawing state
     memcpy(current_drawing, saved_drawing, sizeof(image));
     
+    // Check if the cursor is out of bounds
     if (posX + i < 0 || posX + i > 4) {
         posX = 0;
     } else if (posY + j < 0 || posY + j > 4) {
@@ -75,6 +72,7 @@ void update_board_pos(int i, int j) {
         posY += j;
     }
 
+    // Turn off when the saved state is on and vice versa
     if (image_is_set(posX, posY, saved_drawing)) {
         image_off(posX, posY, current_drawing);
     } else {
@@ -82,6 +80,7 @@ void update_board_pos(int i, int j) {
     }
 }
 
+/* Save the pixel position to the saved state */
 void save_pixel_pos() {
     printf("Is pixel on: %d\n", image_is_set(posX, posY, saved_drawing));
     if (image_is_set(posX, posY, saved_drawing)) {
@@ -91,6 +90,7 @@ void save_pixel_pos() {
     }
 }
 
+/* Play the sound when the receiver receives a packet */
 void play_receive_sound() {
     while (1) {
         if (play_sound == 1) {
@@ -103,52 +103,44 @@ void play_receive_sound() {
     }
 }
 
+/* Receiver task */
 void receiver_task(int dummy)
 {
     byte buf[RADIO_PACKET];
     int n;
-    #define NBUF 80
-    char linebuf[NBUF];
-    image tmp;
-
-    printf("Hello\n");
 
     while (1) {
-        //n = radio_receive(buf);
-        char x = serial_getc();
-        if (x == '1') {
+        n = radio_receive(buf);
+        printf("Received %d bytes\n", n);
+        if (n == sizeof(image)) {
             printf("Packet received\n");
-            memcpy(linebuf, receive_draw2, sizeof(image));
-            memcpy(receive_draw, linebuf, sizeof(image));
 
+            // Copy the received packet to the receive_drawing
+            memcpy(receive_drawing, buf, sizeof(image));
+
+            // Turn on the display mode and play the sound
             display_mode_on = 1;
             play_sound = 1;
-        } else {
-            printf("Unknown packet, length %d: %d\n", n, buf[0]);
         }
-
-        //printf("Received %d bytes\n", n);
-    //     if (n == sizeof(image)) {
-    //         printf("Packet received\n");
-    //         memcpy(saved_drawing, receive_draw, sizeof(image));
-    //     } else {
-    //         printf("Unknown packet, length %d: %d\n", n, buf[0]);
-    //     }
     }
 }
 
+/* Handle the button presses and send the packet */
 void sender_task(int dummy)
 {
+    // Initialise the GPIO pins for the buttons
     gpio_connect(BUTTON_A);
     gpio_connect(BUTTON_B);
 
+    // Button pressed flags
     int button_a = 0;
     int button_b = 0;
+
+    // Time variable
     unsigned time = 0;
 
     while (1) {
-
-        //Two buttons pressed simultaneously
+        //Two buttons pressed simultaneously to send the packet
         if (gpio_in(BUTTON_A) == 0 && gpio_in(BUTTON_B) == 0) 
         {
             printf("Press A and B\n");
@@ -162,15 +154,19 @@ void sender_task(int dummy)
                 button_a = 1;
             }
 
+            // Turn off the display mode when the button is pressed
             if (display_mode_on == 1) {
                 display_mode_on = 0;
             }
-        } else if (gpio_in(BUTTON_A) != 0 && button_a == 1) {
+        } else if (gpio_in(BUTTON_A) != 0 && button_a == 1) //Button A released
+        {
             button_a = 0;
             time = clock_stop();
             time -= FUDGE;
             time /= FREQ;
             printf("Button A time: %d\n", time);
+
+            // Save the pixel position when the button is pressed for a long time
             if (time > PRESSED_TIME) {
                 printf("Long press\n");
                 save_pixel_pos();
@@ -186,15 +182,19 @@ void sender_task(int dummy)
                 button_b = 1;
             }
 
+            // Turn off the display mode when the button is pressed
             if (display_mode_on == 1) {
                 display_mode_on = 0;
             }
-        } else if (gpio_in(BUTTON_B) != 0 && button_b == 1) {
+        } else if (gpio_in(BUTTON_B) != 0 && button_b == 1) //Button B released
+        {
             button_b = 0;
             time = clock_stop();
             time -= FUDGE;
             time /= FREQ;
             printf("Button B time: %d\n", time);
+
+            // Save the pixel position when the button is pressed for a long time
             if (time > PRESSED_TIME) {
                 printf("Long press\n");
                 save_pixel_pos();
@@ -202,20 +202,24 @@ void sender_task(int dummy)
             update_board_pos(1, 0);
         }
 
+        // Delay to prevent the task from hogging the CPU
         timer_delay(200);
     }
 }
 
+/* Handle the display LEDs*/
 void blink_task(int dummy)
 {
     while (1) {
+
+        // Display the current drawing when the display mode is off and the receive drawing when the display mode is on
         if (display_mode_on == 0) {
             display_show(current_drawing);
             timer_delay(BLINK_TIME);
             display_show(saved_drawing);
             timer_delay(BLINK_TIME);
         } else {
-            display_show(receive_draw);
+            display_show(receive_drawing);
             timer_delay(BLINK_TIME);
             display_show(blank);
             timer_delay(BLINK_TIME);
@@ -225,12 +229,14 @@ void blink_task(int dummy)
 
 void init(void)
 {
+    // Init
     serial_init();
     radio_init();
-    //radio_group(GROUP);
     timer_init();
     clock_init();
     display_init();
+
+    // Define the tasks
     start("Sender", sender_task, 0, STACK);
     start("Blinker", blink_task, 0, STACK);
     start("Receiver", receiver_task, 0, STACK);
