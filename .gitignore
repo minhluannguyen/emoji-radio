@@ -1,0 +1,7 @@
+/.vscode
+/Makefile
+/emoji-radio.c
+/emoji-radio.elf
+/emoji-radio.hex
+/emoji-radio.map
+/emoji-radio.o
